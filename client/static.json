@@ -1,0 +1,15 @@
+{
+  "root": "build/",
+  "routes": {
+    "/**": "index.html"
+  },
+  "/static/**": {
+    "Cache-Control": "public, max-age=512000"
+  },
+  "https_only": true,
+  "proxies": {
+    "/api/": {
+      "origin": "https://palettable-server.herokuapp.com/api/"
+    }
+  }
+}

@@ -1,47 +1,79 @@
+[![Build Status](https://travis-ci.org/alecortega/palettable.svg?branch=master)](https://travis-ci.org/alecortega/palettable)
+
 # <img src='http://i.imgur.com/580vPI2.png' height='50'></a>
 
-Generate beautiful color palettes, even with no prior design knowledge.
+Create color palettes using the knowledge of millions of designers.
 
-**Full Website: http://palettable.io**
+**Full Website: https://palettable.io**
 
-![alt tag](http://i.imgur.com/U1ImIj1.png)
+**Fun fact:** Palettable has 2000 daily unique pageviews, 90% of which are from Japan! 
 
-## How It's Made
----
-### Client
-Tech Used: React, Redux, Webpack, Sass
+![alt tag](http://i63.tinypic.com/16iikx4.png)
 
-I tried to make the components as modular as possible so this will be a high level overview of how the data flows throughout the application. If you want to learn more I have several comments in the files containing the actions for Redux as well as several of the React components.
+Palettable is split up into two separate deployables, a web client and a beckend server.
 
-1. On initial load the client queries the `/random` endpoint on the server and receives a random set of 5 colors which is then caches and displays the first in the array.
+## How to run the application:
 
-2. While the user goes through the tutorial, the keyboard events are conditionally blocked based on the current onboarding step using middleware from `redux-thunk`, i.e. they can't dislike a color when the tutorial is telling them to like a color.
+Navigate to the client directory and run: `yarn`.
 
-3. Once the tutorial is over, the actions `CHANGE_COLOR`, `ADD_COLOR`, and `REMOVE_COLOR` are dispatched based on the key that the user presses. The reducers handle these actions and update the state of `shownPalette` accordingly. 
+Navigation to the server directory and run: `yarn`.
 
-4. Since the actions are asynchronous, the actions `REQUEST_PALETTE` and `RECEIVED_PALLETE` are dispatched when server is called. The request action blocks all key events and kicks off the searching animation. When received, key events are re-enabled and searching disappears.
+Navigate to the root directory and run: `yarn start`. This will spin up both the client and the server on the same process.
 
-5. To make the application as composable as possible, a majority of the components are purely presentational components. The two main container components are `App`, which handles the key events and dispatches the proper actions, and `SyncedColor`, which dispatches the actions whenever a user changes the color either by changing the HEX code or by using the color picker.
+Run tests with: `yarn test` in either sub-directory.
 
-#### Challenges and Improvements:
+## Client
 
-- As long as a user likes the next color shown to them there's no reason to re-query the server to fetch a matching palette. Therefore a palette of 5 colors is always cached and all colors will be pulled from there when a `ADD_COLOR` action is dispatched. Whenever a user removes or dislikes a color the cached palette is invalidated and the server will be queried again. This conditional check for validity is again done using `redux-thunk`.
+### Tech Used: React, Redux, Redux-Observable, Sass
 
-- Until the fetched palette has been re-validated all disliked colors are cached and sent back up to the server when it's queried. The server then filters it's response with those cached colors and returns a palette that's guaranteed not to have any colors that have been shown before.
+**Why was this stack chosen?**
 
-#### Redux State Tree:
-![alt tag](http://i.imgur.com/60dsrvo.png)
-![alt tag](http://gifyu.com/images/palettable.gif)
+When a user likes or dislikes, a color a call to Palettable's backend is fired if there are no cached colors left that a user hasn not already liked or disliked. If a user is using the tool fairly quickly this results in a high number of asynchronous calls that all depend on one another and have side effects on client state when they resolve. On top of that, these calls may or may not be fired at all if there are still suggested colors in the cache that a user has not yet seen.
 
-### Server
-Tech Used: Express
+Observables lend themselves well to solving this exact problem by using streams to handle the asynchronous calls and allows a developer to write the outcome of those streams in a very declaritive way. Redux-Observable inject's the current Redux state tree into each Observable function so that we can easily dispatch new events based on the previous state tree.
 
-1. Initial call to server is at the `/api/random` endpoint where it will fetch a new random palette from Colourlovers
+**Other stacks that were considered:**
 
-2. All subsequent calls are made to the `/api/change` endpoint where it will conditionally return a unique array of colors that will be cached on the client.
+Apollo-Client and GraphQL:
 
-#### Challenges and Improvements:
+Although apollo-client implements Observables under the hood to handle HTTP requests, graph architecture lends itself better to structured data. In Palettable most of the state needed to power the app is on the client. While apollo-client can store client-side data and it great for continuous asynchronous calls, it was difficult to implement side effects as a result of those calls and wasn't the best fit for this use-case.
 
-- On initial load the server queries Colourlovers' random palette API endpoint and serves that as the initial palette. On all subsequent calls, the server queries the API end point to find palette that contains the second to last color since that one is the one still liked by the user. In the application I give the user to choose *any* color, not just the ones contained in the data from the API. This becomes a problem since if I called the API with a color it doesn't have it will just return no data. To mitigate this and still give the user as much freedom as possible I've employed a bit of witchcraft. If no match is found I take the HEX code and convert it into a string that describes the code, so if a user customizes a color item to a hex code of `#77834B` and no results are found, the server re-queries the API with a search term of ``"moss green"`` instead. This allows us to give the user more accurate match results while still giving them full freedom to customize any color. If no results are found with the search term, it will default back to a random palette.
+Redux and Redux-Thunk:
 
-- All of this is done through Express middleware, where if no results are found the middleware will just call `next()`.
+While the current implementation still does use Redux to store client-side state, Redux-Thunk wasn't the greatest fit due to it's imperative style. Handling asynchronous calls and their side effects turned into deeply nested Promises and became very difficult to test and reason about.
+
+### Data Flow:
+
+![alt tag](http://i64.tinypic.com/2z9bb07.png)
+
+When a user likes or dislikes a color the action is sent through the redux-observable middleware and the current cache is checked. If there are still suggested colors cached that the user has not disliked or liked then the color is either changed or a new one is added. Otherwise, all disliked and liked colors are sent to the `/api/palette` endpoint and a new palette is fetched. Once the cache is updated with new colors the color is either changed or a new one is added.
+
+### Redux state tree in action:
+
+![](https://user-images.githubusercontent.com/6596787/44816030-11bc9c00-abaf-11e8-99a7-c0f5d2bede61.gif)
+
+## Server
+
+### Tech Used: Express
+
+**Why was this stack chosen?**
+
+Node is a pretty lightweight server choice and can be spun up fairly easily. We needed a backend that could send a different response based on the result of another controller and the ability to dynamically render a `.png` file. By using Express' built in middleware architecture we could cleanly write fallbacks and we can build images using an API that's very similar to the front-end canvas API.
+
+### Data Flow:
+
+![](https://user-images.githubusercontent.com/6596787/44816092-3d3f8680-abaf-11e8-9245-82c049864ebc.png)
+
+Palettable gives the user the ability to create a palette with _any_ color, but our suggestions are powered by the ColourLovers API so there isn't a human-generated palette for every hex code imaginable. To get around this we search the API using several different methods.
+
+**1. Search by exact hex code**
+
+First, we check if there is a human-generated palette containing the exact hex code we're searching for. We flatten all the palettes returned from the API and if there are 5 colors that have not been previously liked or disliked then we return those back to the client, otherwise we try another method.
+
+**2. Search by exact search term**
+
+If there isn't a palette that matches the exact hex code we want then we employ a bit of witchcraft. We transform the hex code into a string that describes it. For instance the hex code of `#0000FF` may be transformed into the string `"cobalt blue"` and we query the API with that search term. This allows us to query for a palette that resembles the one we're looking for while still giving the user the ability to create a palette with any color they wish to use.
+
+**3. Search for random palette**
+
+If we have exhausted all our options then we return a random palette back to the client.
